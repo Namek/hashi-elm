@@ -33,21 +33,30 @@ type alias Puzzle =
     }
 
 
+xy_idx : Int -> Int -> Int -> Int
+xy_idx width x y =
+    y * width + x
+
+
+idx_x : Int -> Int -> Int
+idx_x width index =
+    modBy width index
+
+
+idx_y : Int -> Int -> Int
+idx_y width index =
+    index // width
+
+
 unwrapIslandIndex : Island -> Int
-unwrapIslandIndex island =
-    case island of
-        Island index _ _ _ _ ->
+unwrapIslandIndex (Island index _ _ _ _) =
             index
 
 
 getIslandByIndex : List Island -> Int -> Maybe Island
 getIslandByIndex islands idx =
     List.Extra.find
-        (\island ->
-            case island of
-                Island index _ _ _ _ ->
-                    index == idx
-        )
+        (\(Island index _ _ _ _) -> index == idx)
         islands
 
 
@@ -61,6 +70,40 @@ isIslandFilled : Puzzle -> Island -> Bool
 isIslandFilled puzzle island =
     -- TODO check bridges
     False
+
+
+directionFromIsland : Int -> Int -> Int -> Direction
+directionFromIsland width fromIndex toIndex =
+    let
+        dx =
+            idx_x width toIndex - idx_x width fromIndex
+
+        dy =
+            idx_y width toIndex - idx_y width fromIndex
+    in
+    if dx > 0 then
+        Right
+
+    else if dx < 0 then
+        Left
+
+    else if dy > 0 then
+        Down
+
+    else
+        Up
+
+
+distanceBetweenIslands : Int -> Int -> Int -> Int
+distanceBetweenIslands width idx1 idx2 =
+    let
+        dx =
+            idx_x width idx1 - idx_x width idx2
+
+        dy =
+            idx_y width idx1 - idx_y width idx2
+    in
+    max dx dy
 
 
 {-| Find a closest island to the given one. Do not check for collisions.

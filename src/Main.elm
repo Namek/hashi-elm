@@ -57,21 +57,6 @@ type IslandDrag
     | SecondIslandHovered Int Int
 
 
-xy_idx : Int -> Int -> Int -> Int
-xy_idx width x y =
-    y * width + x
-
-
-idx_x : Int -> Int -> Int
-idx_x width index =
-    modBy width index
-
-
-idx_y : Int -> Int -> Int
-idx_y width index =
-    index // width
-
-
 
 -- UPDATE
 
@@ -171,16 +156,20 @@ update msg model =
 
                         _ ->
                             Nothing
-
-                direction =
-                    -- TODO determine a direction based on x,y and currently the first island
-                    Up
             in
             -- draw bridge from first island to any other second if model allows it:
             -- the neighbour island can't be filled and there has to be a clear way to from the first one.
             maybeFirstIslandIndex
                 |> Maybe.andThen
                     (\i1_idx ->
+                        let
+                            direction =
+                                let
+                                    ( islandX, islandY ) =
+                                        getIslandRenderPos puzzle.width i1_idx
+                                in
+                                directionFromPoint ( x, y ) ( islandX, islandY )
+                        in
                         case findNeighbourIsland puzzle i1_idx direction of
                             Just i2_idx ->
                                 Just ( i1_idx, i2_idx )
@@ -204,6 +193,18 @@ update msg model =
                     pass
 
 
+directionFromPoint ( fromX, fromY ) ( toX, toY ) =
+    let
+        dx =
+            toX - fromX
+
+        dy =
+            toY - fromY
+    in
+    -- TODO compare what's closest
+    Up
+
+
 
 -- VIEW
 
@@ -225,6 +226,10 @@ view model =
 
 strNum =
     String.fromInt
+
+
+strNumf =
+    String.fromFloat
 
 
 renderPuzzle model =
@@ -260,6 +265,13 @@ circleRadius =
     fieldSize // 2
 
 
+getIslandRenderPos : Int -> Int -> ( Float, Float )
+getIslandRenderPos width index =
+    ( idx_x width index * fieldSize + circleRadius |> toFloat
+    , idx_y width index * fieldSize + circleRadius |> toFloat
+    )
+
+
 isIslandHovered : IslandDrag -> Int -> Bool
 isIslandHovered drag expectedIslandIndex =
     case drag of
@@ -287,11 +299,8 @@ renderIslands { puzzle, islandDrag } =
                         Island i t r b l ->
                             ( t + r + b + l, i )
 
-                posX =
-                    idx_x puzzle.width index * fieldSize + circleRadius
-
-                posY =
-                    idx_y puzzle.width index * fieldSize + circleRadius
+                ( posX, posY ) =
+                    getIslandRenderPos puzzle.width index
 
                 isHovered =
                     isIslandHovered islandDrag index
@@ -340,16 +349,16 @@ renderBridges puzzle =
 renderCircle number posX posY isHovered =
     Svg.g []
         [ Svg.circle
-            [ cx <| strNum posX
-            , cy <| strNum posY
+            [ cx <| strNumf posX
+            , cy <| strNumf posY
             , r <| strNum <| circleRadius
             , fill <| either (color 255 255 255) (color 255 0 0) <| isHovered
             , stroke <| color 0 0 0
             ]
             []
         , Svg.text_
-            [ x <| strNum <| posX
-            , y <| strNum <| posY
+            [ x <| strNumf <| posX
+            , y <| strNumf <| posY
             , Svg.Attributes.textAnchor "middle"
             , Svg.Attributes.dominantBaseline "central"
             , Svg.Attributes.fontSize <| strNum circleRadius ++ "pt"

@@ -1,6 +1,9 @@
 module Puzzle.Model exposing (..)
 
+import Array exposing (Array)
 import List.Extra
+import Maybe exposing (Maybe)
+import Maybe.Extra
 
 
 type Orientation
@@ -16,21 +19,63 @@ type Direction
 
 
 type Island
-    = -- position index in array, connection counts: top, right, bottom left
-      Island Int Int Int Int Int
+    = -- position index in array, max connection counts, current connection counts
+      Island Int ConnectionCounts ConnectionCounts
 
 
-type Bridge
-    = -- current connection count, max connection count, 2 indices (in the array) of the connected islands
-      Bridge Int Int Orientation Int Int
+{-| top, right, bottom left
+-}
+type alias ConnectionCounts =
+    { top : Int, right : Int, bottom : Int, left : Int }
+
+
+connectionCount : Int -> Int -> Int -> Int -> ConnectionCounts
+connectionCount top right bottom left =
+    { top = top, right = right, bottom = bottom, left = left }
 
 
 type alias Puzzle =
-    { islands : List Island
-    , bridges : List Bridge
+    { islands : Islands
+    , connections : Connections
     , width : Int
     , height : Int
     }
+
+
+type alias Islands =
+    { list : List Island
+
+    -- redundant, optimization for a quick check on island neighbour lookup
+    , fields : Array Bool
+    }
+
+
+type alias Connections =
+    { list : List Connection
+    , -- counts; redundant, optimization for a quick check on drawn bridges over the x,y positions
+      fields : Array Int
+    }
+
+
+{-| smallerIslandIdx, biggerIslandIdx, connectionCount
+-}
+type alias Connection =
+    ( Int, Int, Int )
+
+
+addIsland : Int -> Int -> Int -> Int -> Int -> Islands -> Islands
+addIsland index t r b l islands =
+    { list = Island index (connectionCount t r b l) (connectionCount 0 0 0 0) :: islands.list
+
+    -- TODO update the fields
+    , fields = Array.set index True islands.fields
+    }
+
+
+addIslandsConnection : Int -> Int -> Puzzle -> Puzzle
+addIslandsConnection idx1 idx2 puzzle =
+    -- TODO update puzzle.islands and puzzle.connections
+    puzzle
 
 
 xy_idx : Int -> Int -> Int -> Int
@@ -49,15 +94,15 @@ idx_y width index =
 
 
 unwrapIslandIndex : Island -> Int
-unwrapIslandIndex (Island index _ _ _ _) =
-            index
+unwrapIslandIndex (Island index _ _) =
+    index
 
 
-getIslandByIndex : List Island -> Int -> Maybe Island
+getIslandByIndex : Islands -> Int -> Maybe Island
 getIslandByIndex islands idx =
     List.Extra.find
-        (\(Island index _ _ _ _) -> index == idx)
-        islands
+        (\(Island index _ _) -> index == idx)
+        islands.list
 
 
 getIslandFreeConnectionCount : Puzzle -> Island -> Int
@@ -106,75 +151,91 @@ distanceBetweenIslands width idx1 idx2 =
     max dx dy
 
 
-{-| Find a closest island to the given one. Do not check for collisions.
+directionToConnectionCount : Direction -> ConnectionCounts -> Int
+directionToConnectionCount dir { top, right, bottom, left } =
+    case dir of
+        Up ->
+            top
+
+        Right ->
+            right
+
+        Down ->
+            bottom
+
+        Left ->
+            left
+
+
+directionToPosDiff : Direction -> ( Int, Int )
+directionToPosDiff dir =
+    case dir of
+        Up ->
+            ( 0, -1 )
+
+        Right ->
+            ( 1, 0 )
+
+        Down ->
+            ( 0, 1 )
+
+        Left ->
+            ( -1, 0 )
+
+
+traverseToNextIsland : Puzzle -> Int -> Direction -> Maybe Int
+traverseToNextIsland puzzle fromIndex direction =
+    let
+        ( dx, dy ) =
+            directionToPosDiff direction
+
+        startX =
+            idx_x puzzle.width fromIndex
+
+        startY =
+            idx_y puzzle.width fromIndex
+
+        iterate x y =
+            if x < 0 || x >= puzzle.width || y >= puzzle.height || y < 0 then
+                Nothing
+
+            else
+                let
+                    idx =
+                        xy_idx puzzle.width x y
+                in
+                case Array.get idx puzzle.islands.fields of
+                    Just True ->
+                        Just idx
+
+                    _ ->
+                        iterate (x + dx) (y + dy)
+    in
+    --  iterate until another Island is found OR we get out of map
+    iterate (startX + dx) (startY + dy)
+
+
+{-| Find a closest island to the given one, in given direction. Do not check for collisions.
 -}
 findNeighbourIsland : Puzzle -> Int -> Direction -> Maybe Int
 findNeighbourIsland puzzle islandIndex direction =
     getIslandByIndex puzzle.islands islandIndex
-        |> Maybe.map
-            (\island ->
-                case island of
-                    Island idx t r b l ->
-                        -- TODO find the neighbour of this one
-                        idx
-            )
-
-
-findBridgeBetweenIslands : Puzzle -> Int -> Int -> Maybe Bridge
-findBridgeBetweenIslands puzzle i1_idx i2_idx =
-    puzzle.bridges
-        |> List.Extra.find
-            (\bridge ->
-                isBridgeForIslands i1_idx i2_idx bridge
-            )
-
-
-isBridgeForIslands : Int -> Int -> Bridge -> Bool
-isBridgeForIslands i1_idx i2_idx bridge =
-    case bridge of
-        Bridge count maxCount _ idx1 idx2 ->
-            (( idx1, idx2 ) == ( i1_idx, i2_idx ))
-                || (( idx2, idx1 ) == ( i1_idx, i2_idx ))
-
-
-anyCollisionsOtherThan : Puzzle -> Bridge -> Bool
-anyCollisionsOtherThan puzzle bridge =
-    -- TODO: look at all bridges (except the given one) to find out if any of those crosses the path of this one
-    False
-
-
-{-| Finds if there are available bridge connections to set between two islands. Checks for collisions.
--}
-getCurrentMaxConnections : Puzzle -> Int -> Int -> ( Int, Int )
-getCurrentMaxConnections puzzle i1_idx i2_idx =
-    findBridgeBetweenIslands puzzle i1_idx i2_idx
         |> Maybe.andThen
-            (\bridge ->
-                if anyCollisionsOtherThan puzzle bridge then
-                    Just bridge
+            (\(Island _ maxConns _) ->
+                if directionToConnectionCount direction maxConns > 0 then
+                    traverseToNextIsland puzzle islandIndex direction
 
                 else
                     Nothing
             )
-        |> Maybe.map (\(Bridge count maxCount _ _ _) -> ( count, maxCount ))
-        |> Maybe.withDefault ( 0, 0 )
 
 
 isThereClearWay : Puzzle -> Int -> Int -> Bool
 isThereClearWay puzzle i1_idx i2_idx =
-    getCurrentMaxConnections puzzle i1_idx i2_idx
-        |> (\( current, max ) -> max > 0)
-
-
-{-| Circles between [0, 1, ... max] connections between 2 islands.
--}
-switchConnectionCount : Island -> Island -> Bridge -> Bridge
-switchConnectionCount i1 i2 bridge =
-    -- TODO
-    bridge
-
-
-bridgesToIslands : List Bridge -> List Island
-bridgesToIslands bridges =
-    -- TODO
-    []
+    let
+        direction =
+            directionFromIsland puzzle.width i1_idx i2_idx
+    in
+    traverseToNextIsland puzzle i1_idx direction
+        |> Maybe.map (\idx -> idx == i2_idx)
+        |> Maybe.withDefault False

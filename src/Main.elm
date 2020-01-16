@@ -179,6 +179,9 @@ update msg model =
                     )
                 |> Maybe.andThen
                     (\( i1_idx, i2_idx ) ->
+                        -- TODO this is useless because it traverses again but we actually wanted to check max connection count.
+                        -- Although we'll change the logic. We want to render the final result before applying it.
+                        -- Also, we want to check for a touch distance to have a way to cancel the draw.
                         if isThereClearWay puzzle i1_idx i2_idx then
                             Just <| SecondIslandHovered i1_idx i2_idx
 
@@ -201,8 +204,11 @@ directionFromPoint ( fromX, fromY ) ( toX, toY ) =
         dy =
             toY - fromY
     in
-    -- TODO compare what's closest
-    Up
+    if abs dx > abs dy then
+        either Left Right <| (dx > 0)
+
+    else
+        either Up Down <| (dy > 0)
 
 
 
@@ -250,7 +256,7 @@ renderPuzzle model =
                     ]
         , style "user-select: none"
         ]
-        (List.append (renderIslands model) (renderBridges puzzle))
+        (List.append (renderIslands model) (renderConns puzzle))
 
 
 scaleFactor =
@@ -296,8 +302,8 @@ renderIslands { puzzle, islandDrag } =
             let
                 ( number, index ) =
                     case island of
-                        Island i t r b l ->
-                            ( t + r + b + l, i )
+                        Island idx { top, right, bottom, left } _ ->
+                            ( top + right + bottom + left, idx )
 
                 ( posX, posY ) =
                     getIslandRenderPos puzzle.width index
@@ -314,36 +320,29 @@ renderIslands { puzzle, islandDrag } =
                 [ renderCircle number posX posY isHovered
                 ]
     in
-    puzzle.islands |> List.map renderIsland
+    puzzle.islands.list |> List.map renderIsland
 
 
-renderBridges : Puzzle -> List (Html Msg)
-renderBridges puzzle =
+renderConns : Puzzle -> List (Html Msg)
+renderConns puzzle =
     let
-        renderBridge : Bridge -> Html Msg
-        renderBridge bridge =
-            case bridge of
-                Bridge 0 _ _ _ _ ->
+        renderConn : Connection -> Html Msg
+        renderConn conn =
+            case conn of
+                ( 0, _, _ ) ->
                     emptySvg
 
-                Bridge count maxCount dir from to ->
+                ( from, to, count ) ->
                     let
-                        -- TODO
-                        startX =
-                            idx_x puzzle.width from * fieldSize + circleRadius
+                        ( startX, startY ) =
+                            getIslandRenderPos puzzle.width from
 
-                        startY =
-                            idx_y puzzle.width from * fieldSize + circleRadius
-
-                        endX =
-                            idx_x puzzle.width to * fieldSize + circleRadius
-
-                        endY =
-                            idx_y puzzle.width to * fieldSize + circleRadius
+                        ( endX, endY ) =
+                            getIslandRenderPos puzzle.width to
                     in
                     renderLines count startX startY endX endY
     in
-    puzzle.bridges |> List.map renderBridge
+    puzzle.connections.list |> List.map renderConn
 
 
 renderCircle number posX posY isHovered =
@@ -372,10 +371,10 @@ renderCircle number posX posY isHovered =
 renderLines count startX startY endX endY =
     -- TODO count
     Svg.line
-        [ x1 <| strNum startX
-        , y1 <| strNum startY
-        , x2 <| strNum endX
-        , y2 <| strNum endY
+        [ x1 <| strNumf startX
+        , y1 <| strNumf startY
+        , x2 <| strNumf endX
+        , y2 <| strNumf endY
         , Svg.Attributes.style "stroke:rgb(255,0,0);stroke-width:0.5"
         ]
         []

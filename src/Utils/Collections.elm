@@ -1,4 +1,4 @@
-module Utils.Collections exposing (mapNumbersToValues)
+module Utils.Collections exposing (mapNumbersToValues, maybeToList)
 
 import List.Extra
 
@@ -14,3 +14,8 @@ mapNumbersToValues values firstNumberForFirstValue numbers =
                 in
                 List.Extra.getAt index values
             )
+
+
+maybeToList : Maybe a -> List a
+maybeToList maybe =
+    maybe |> Maybe.map (\a -> [ a ]) |> Maybe.withDefault []

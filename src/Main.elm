@@ -4,10 +4,12 @@ import Browser
 import Html exposing (Html, div, text)
 import Html.Attributes
 import Html.Events.Extra.Pointer as Pointer
+import Maybe.Extra
 import Puzzle.Generation exposing (puzzle1)
 import Puzzle.Model exposing (..)
 import Svg
 import Svg.Attributes exposing (..)
+import Utils.Collections exposing (maybeToList)
 import Utils.Misc exposing (either, emptySvg, isMaybeValue, noCmd)
 
 
@@ -24,9 +26,6 @@ main =
 type alias Model =
     { puzzle : Puzzle
     , islandDrag : IslandDrag
-
-    -- islands' index from, index to
-    , temporaryBridge : Maybe ( Int, Int )
     }
 
 
@@ -44,7 +43,6 @@ init flags =
     in
     ( { puzzle = puzzle1 -- generatePuzzle seed width height
       , islandDrag = NoIslandsHovered
-      , temporaryBridge = Nothing
       }
     , Cmd.none
     )
@@ -54,7 +52,8 @@ type IslandDrag
     = NoIslandsHovered
     | FirstIslandHovered Int
     | FirstIslandPinned Int
-    | SecondIslandHovered Int Int
+      -- percent, island1Index, island2Index
+    | SecondIslandPicked Float Int Int
 
 
 
@@ -95,11 +94,11 @@ update msg model =
                 FirstIslandHovered idx ->
                     ( { model | islandDrag = FirstIslandHovered islandIndex }, Cmd.none )
 
-                FirstIslandPinned idx ->
-                    ( { model | islandDrag = SecondIslandHovered idx islandIndex }, Cmd.none )
+                FirstIslandPinned _ ->
+                    pass
 
-                SecondIslandHovered idx1 idx2 ->
-                    ( { model | islandDrag = SecondIslandHovered idx1 idx2 }, Cmd.none )
+                SecondIslandPicked _ _ _ ->
+                    pass
 
         GotIslandUnhovered ->
             case model.islandDrag of
@@ -112,8 +111,8 @@ update msg model =
                 FirstIslandPinned idx ->
                     pass
 
-                SecondIslandHovered idx1 idx2 ->
-                    ( { model | islandDrag = FirstIslandPinned idx1 }, Cmd.none )
+                SecondIslandPicked _ idx1 idx2 ->
+                    pass
 
         GotDragStarted ->
             case model.islandDrag of
@@ -126,7 +125,7 @@ update msg model =
                 FirstIslandPinned idx ->
                     pass
 
-                SecondIslandHovered idx1 idx2 ->
+                SecondIslandPicked _ idx1 idx2 ->
                     pass
 
         GotDragShouldStop ->
@@ -151,7 +150,7 @@ update msg model =
                         FirstIslandPinned idx ->
                             Just idx
 
-                        SecondIslandHovered idx1 idx2 ->
+                        SecondIslandPicked _ idx1 idx2 ->
                             Just idx1
 
                         _ ->
@@ -163,31 +162,56 @@ update msg model =
                 |> Maybe.andThen
                     (\i1_idx ->
                         let
+                            ( islandX, islandY ) =
+                                getIslandRenderPos puzzle.width i1_idx
+
+                            ( rescaledX, rescaledY ) =
+                                rescalePos_InputToLogic puzzle ( x, y )
+
                             direction =
-                                let
-                                    ( islandX, islandY ) =
-                                        getIslandRenderPos puzzle.width i1_idx
-                                in
-                                directionFromPoint ( x, y ) ( islandX, islandY )
+                                directionFromPoint
+                                    (physicalRenderPos ( rescaledX, rescaledY ))
+                                    (physicalRenderPos ( islandX, islandY ))
+
+                            neighbour =
+                                findNeighbourIsland puzzle i1_idx direction
                         in
-                        case findNeighbourIsland puzzle i1_idx direction of
+                        case neighbour of
                             Just i2_idx ->
-                                Just ( i1_idx, i2_idx )
+                                let
+                                    ( neighbourX, neighbourY ) =
+                                        getIslandRenderPos puzzle.width i2_idx
+
+                                    ( to, from, pos ) =
+                                        if (abs <| neighbourX - islandX) > (abs <| neighbourY - islandY) then
+                                            ( neighbourX, islandX, rescaledX )
+
+                                        else
+                                            ( neighbourY, islandY, rescaledY )
+
+                                    distancePercent =
+                                        pos |> rescale from to 0.0 1.0 |> Basics.min 1.0
+                                in
+                                Just ( i1_idx, i2_idx, distancePercent )
 
                             _ ->
                                 Nothing
                     )
                 |> Maybe.andThen
-                    (\( i1_idx, i2_idx ) ->
-                        -- TODO this is useless because it traverses again but we actually wanted to check max connection count.
-                        -- Although we'll change the logic. We want to render the final result before applying it.
-                        -- Also, we want to check for a touch distance to have a way to cancel the draw.
+                    (\( i1_idx, i2_idx, distancePercent ) ->
                         if isThereClearWay puzzle i1_idx i2_idx then
-                            Just <| SecondIslandHovered i1_idx i2_idx
+                            Just <| SecondIslandPicked distancePercent i1_idx i2_idx
 
                         else
-                            Nothing
+                            case model.islandDrag of
+                                SecondIslandPicked _ _ _ ->
+                                    -- TODO this does not work??
+                                    Just NoIslandsHovered
+
+                                _ ->
+                                    Nothing
                     )
+                --|> Maybe.Extra.or (Just NoIslandsHovered)
                 |> Maybe.map
                     (\islandDrag ->
                         { model | islandDrag = islandDrag } |> noCmd
@@ -223,9 +247,12 @@ view model =
         , Pointer.onLeave (always GotDragShouldStop)
         , Pointer.onUp (always GotDragShouldStop)
         ]
-        [ text <| String.fromInt <| model.puzzle.width
-        , text "x"
-        , text <| String.fromInt <| model.puzzle.height
+        [ div []
+            [ text <| String.fromInt <| model.puzzle.width
+            , text "x"
+            , text <| String.fromInt <| model.puzzle.height
+            , text <| String.fromFloat <| (unwrapTemporaryBridge model.islandDrag |> Maybe.map (\( percent, idx1, idx2 ) -> percent) |> Maybe.withDefault 0.0)
+            ]
         , renderPuzzle model
         ]
 
@@ -238,10 +265,43 @@ strNumf =
     String.fromFloat
 
 
+unwrapTemporaryBridge : IslandDrag -> Maybe ( Float, Int, Int )
+unwrapTemporaryBridge drag =
+    case drag of
+        SecondIslandPicked lengthPercent idx1 idx2 ->
+            Just ( lengthPercent, idx1, idx2 )
+
+        _ ->
+            Nothing
+
+
+rescale fromLeft fromRight toLeft toRight value =
+    let
+        fromWidth =
+            fromRight - fromLeft
+
+        toWidth =
+            toRight - toLeft
+    in
+    (value - fromLeft) / fromWidth * toWidth + toLeft
+
+
+renderPuzzle : Model -> Html Msg
 renderPuzzle model =
     let
         { puzzle } =
             model
+
+        alreadyDrawnConnections =
+            puzzle.connections.list |> List.map (renderConnection puzzle)
+
+        temporaryBridge : Maybe (Html Msg)
+        temporaryBridge =
+            unwrapTemporaryBridge model.islandDrag
+                |> Maybe.map
+                    (\( percent, idx1, idx2 ) ->
+                        renderTemporaryBridge puzzle idx1 idx2 percent
+                    )
     in
     Svg.svg
         [ width <| strNum (puzzle.width * fieldSize * scaleFactor)
@@ -249,18 +309,30 @@ renderPuzzle model =
         , viewBox <|
             String.join " " <|
                 List.map strNum
-                    [ -1
-                    , -1
-                    , (puzzle.width + 1) * fieldSize + 2
-                    , (puzzle.height + 1) * fieldSize + 2
+                    [ -margin
+                    , -margin
+                    , puzzle.width * fieldSize + margin * 2
+                    , puzzle.height * fieldSize + margin * 2
                     ]
         , style "user-select: none"
+        , Pointer.onMove <| \evt -> CheckBridgeDirection evt.pointer.offsetPos
         ]
-        (List.append (renderIslands model) (renderConns puzzle))
+        (List.concat
+            [ renderIslands model
+            , alreadyDrawnConnections
+            , temporaryBridge |> maybeToList
+
+            --, [ renderLine px py (px + 1) py "stroke:rgb(0,127,0);stroke-width:1" ]
+            ]
+        )
 
 
 scaleFactor =
     5
+
+
+margin =
+    4
 
 
 fieldSize =
@@ -278,6 +350,20 @@ getIslandRenderPos width index =
     )
 
 
+{-| Physical means it's scaled by the scaleFactor and takes margin into the account.
+-}
+physicalRenderPos : ( Float, Float ) -> ( Float, Float )
+physicalRenderPos ( x, y ) =
+    ( (x - margin) * scaleFactor, (y - margin) * scaleFactor )
+
+
+rescalePos_InputToLogic : { a | width : Int, height : Int } -> ( Float, Float ) -> ( Float, Float )
+rescalePos_InputToLogic { width, height } ( x, y ) =
+    ( rescale 0 (width * fieldSize * scaleFactor |> toFloat) -margin (width * fieldSize + margin |> toFloat) x
+    , rescale 0 (height * fieldSize * scaleFactor |> toFloat) -margin (height * fieldSize + margin |> toFloat) y
+    )
+
+
 isIslandHovered : IslandDrag -> Int -> Bool
 isIslandHovered drag expectedIslandIndex =
     case drag of
@@ -290,7 +376,7 @@ isIslandHovered drag expectedIslandIndex =
         FirstIslandPinned idx ->
             idx == expectedIslandIndex
 
-        SecondIslandHovered idx1 idx2 ->
+        SecondIslandPicked _ idx1 idx2 ->
             idx1 == expectedIslandIndex || idx2 == expectedIslandIndex
 
 
@@ -315,7 +401,6 @@ renderIslands { puzzle, islandDrag } =
                 [ Pointer.onOver <| (always <| GotIslandHovered index)
                 , Pointer.onLeave <| always GotIslandUnhovered
                 , Pointer.onDown <| (always <| PinIsland index)
-                , Pointer.onMove <| \evt -> CheckBridgeDirection evt.pointer.offsetPos
                 ]
                 [ renderCircle number posX posY isHovered
                 ]
@@ -323,26 +408,51 @@ renderIslands { puzzle, islandDrag } =
     puzzle.islands.list |> List.map renderIsland
 
 
-renderConns : Puzzle -> List (Html Msg)
-renderConns puzzle =
+renderConnection : Puzzle -> Connection -> Html Msg
+renderConnection puzzle conn =
+    case conn of
+        ( 0, _, _ ) ->
+            emptySvg
+
+        ( from, to, count ) ->
+            let
+                ( startX, startY ) =
+                    getIslandRenderPos puzzle.width from
+
+                ( endX, endY ) =
+                    getIslandRenderPos puzzle.width to
+            in
+            renderLines count startX startY endX endY
+
+
+renderLines count startX startY endX endY =
+    -- TODO count
+    renderLine startX startY endX endY "stroke:rgb(255,0,0);stroke-width:0.5"
+
+
+renderTemporaryBridge : Puzzle -> Int -> Int -> Float -> Html Msg
+renderTemporaryBridge puzzle from to percent =
     let
-        renderConn : Connection -> Html Msg
-        renderConn conn =
-            case conn of
-                ( 0, _, _ ) ->
-                    emptySvg
+        ( startX, startY ) =
+            getIslandRenderPos puzzle.width from
 
-                ( from, to, count ) ->
-                    let
-                        ( startX, startY ) =
-                            getIslandRenderPos puzzle.width from
+        ( toX, toY ) =
+            getIslandRenderPos puzzle.width to
 
-                        ( endX, endY ) =
-                            getIslandRenderPos puzzle.width to
-                    in
-                    renderLines count startX startY endX endY
+        ( dx, dy ) =
+            ( toX - startX, toY - startY )
+
+        ( endX, endY ) =
+            ( startX + dx * percent, startY + dy * percent )
+
+        lineStyle =
+            "stroke:rgb(0,255,0);stroke-width:5"
     in
-    puzzle.connections.list |> List.map renderConn
+    renderLine startX startY endX endY lineStyle
+
+
+
+-- Non-domain Utils
 
 
 renderCircle number posX posY isHovered =
@@ -368,14 +478,13 @@ renderCircle number posX posY isHovered =
         ]
 
 
-renderLines count startX startY endX endY =
-    -- TODO count
+renderLine startX startY endX endY lineStyle =
     Svg.line
         [ x1 <| strNumf startX
         , y1 <| strNumf startY
         , x2 <| strNumf endX
         , y2 <| strNumf endY
-        , Svg.Attributes.style "stroke:rgb(255,0,0);stroke-width:0.5"
+        , Svg.Attributes.style lineStyle
         ]
         []
 

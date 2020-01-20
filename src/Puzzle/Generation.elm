@@ -1,6 +1,7 @@
 module Puzzle.Generation exposing (..)
 
 import Array exposing (Array)
+import Dict exposing (Dict)
 import Puzzle.Model exposing (..)
 import Utils.Collections exposing (mapNumbersToValues)
 import Utils.Random exposing (generateNumbers)
@@ -52,14 +53,14 @@ generatePuzzle seed width height =
     { width = width
     , height = height
     , islands = islands
-    , connections = { list = [], fields = Array.empty }
+    , connections = { list = [], fields = Dict.empty }
     }
 
 
 bridgesToIslands : List Bridge -> Islands
 bridgesToIslands bridges =
     -- TODO
-    { list = [], fields = Array.empty }
+    { list = [], fields = Dict.empty }
 
 
 getBridgesOfIsland : List Bridge -> Int -> List ( Bridge, Int )
@@ -114,7 +115,7 @@ puzzle1 =
         --    bridgesToIslands bridges
         islands : Islands
         islands =
-            { list = [], fields = Array.empty }
+            { list = [], fields = Dict.empty }
                 |> isl 0 0 2 1 0
                 |> isl 3 0 0 1 2
                 |> isl 9 0 1 0 0
@@ -125,5 +126,5 @@ puzzle1 =
     { width = width
     , height = height
     , islands = islands
-    , connections = { list = [], fields = Array.empty }
+    , connections = { list = [], fields = Dict.empty }
     }

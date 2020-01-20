@@ -1,9 +1,8 @@
 module Puzzle.Model exposing (..)
 
-import Array exposing (Array)
+import Dict exposing (Dict)
 import List.Extra
 import Maybe exposing (Maybe)
-import Maybe.Extra
 
 
 type Orientation
@@ -46,14 +45,14 @@ type alias Islands =
     { list : List Island
 
     -- redundant, optimization for a quick check on island neighbour lookup
-    , fields : Array Bool
+    , fields : Dict Int Bool
     }
 
 
 type alias Connections =
     { list : List Connection
-    , -- counts; redundant, optimization for a quick check on drawn bridges over the x,y positions
-      fields : Array Int
+    , -- indices of islands which are connected; redundant, optimization for a quick check on drawn bridges over the x,y positions
+      fields : Dict Int ( Int, Int )
     }
 
 
@@ -66,9 +65,7 @@ type alias Connection =
 addIsland : Int -> Int -> Int -> Int -> Int -> Islands -> Islands
 addIsland index t r b l islands =
     { list = Island index (connectionCount t r b l) (connectionCount 0 0 0 0) :: islands.list
-
-    -- TODO update the fields
-    , fields = Array.set index True islands.fields
+    , fields = Dict.insert index True islands.fields
     }
 
 
@@ -204,7 +201,7 @@ traverseToNextIsland puzzle fromIndex direction =
                     idx =
                         xy_idx puzzle.width x y
                 in
-                case Array.get idx puzzle.islands.fields of
+                case Dict.get idx puzzle.islands.fields of
                     Just True ->
                         Just idx
 
@@ -221,21 +218,62 @@ findNeighbourIsland : Puzzle -> Int -> Direction -> Maybe Int
 findNeighbourIsland puzzle islandIndex direction =
     getIslandByIndex puzzle.islands islandIndex
         |> Maybe.andThen
-            (\(Island _ maxConns _) ->
-                if directionToConnectionCount direction maxConns > 0 then
-                    traverseToNextIsland puzzle islandIndex direction
-
-                else
-                    Nothing
+            (\(Island _ _ _) ->
+                traverseToNextIsland puzzle islandIndex direction
             )
 
 
+sortedIndex idx1 idx2 =
+    ( min idx1 idx2, max idx1 idx2 )
+
+
+{-| Check if there is no collision in a way between two puzzles.
+-}
 isThereClearWay : Puzzle -> Int -> Int -> Bool
-isThereClearWay puzzle i1_idx i2_idx =
+isThereClearWay puzzle fromIndex toIndex =
     let
         direction =
-            directionFromIsland puzzle.width i1_idx i2_idx
+            directionFromIsland puzzle.width fromIndex toIndex
+
+        ( dx, dy ) =
+            directionToPosDiff direction
+
+        ( startX, startY ) =
+            ( idx_x puzzle.width fromIndex
+            , idx_y puzzle.width fromIndex
+            )
+
+        ( endX, endY ) =
+            ( idx_x puzzle.width toIndex
+            , idx_y puzzle.width toIndex
+            )
+
+        expectedTarget =
+            sortedIndex fromIndex toIndex
+
+        iterate x y =
+            if x < 0 || x >= puzzle.width || y >= puzzle.height || y < 0 then
+                False
+
+            else if x == endX && y == endY then
+                True
+
+            else
+                let
+                    idx =
+                        xy_idx puzzle.width x y
+                in
+                case Dict.get idx puzzle.connections.fields of
+                    Just ( idx1, idx2 ) ->
+                        -- If there is connection but it's the one between
+                        -- those same islands then we don't break the traversal.
+                        if ( idx1, idx2 ) == expectedTarget then
+                            iterate (x + dx) (y + dy)
+
+                        else
+                            False
+
+                    _ ->
+                        iterate (x + dx) (y + dy)
     in
-    traverseToNextIsland puzzle i1_idx direction
-        |> Maybe.map (\idx -> idx == i2_idx)
-        |> Maybe.withDefault False
+    iterate (startX + dx) (startY + dy)

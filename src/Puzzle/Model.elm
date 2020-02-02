@@ -427,7 +427,7 @@ canDraw puzzle fromIdx toIdx =
         fromIsland =
             getIslandByIndex puzzle.islands fromIdx
 
-        isFilled =
+        isFromFilled =
             fromIsland
                 |> Maybe.map isIslandFilled
                 |> Maybe.withDefault False
@@ -435,7 +435,7 @@ canDraw puzzle fromIdx toIdx =
         direction =
             directionFromIsland puzzle.width fromIdx toIdx
     in
-    if isFilled then
+    if isFromFilled then
         -- if the 'from' island is filled then we can allow drawing only for disconnecting existing connections
         case fromIsland of
             Just (Island _ maxConns curConns) ->
@@ -457,8 +457,17 @@ canDraw puzzle fromIdx toIdx =
 
                     maxConnectionSize =
                         puzzle.maxConnectionCount
+
+                    toIsland =
+                        getIslandByIndex puzzle.islands toIdx
+
+                    isToFilled () =
+                        toIsland
+                            |> Maybe.map isIslandFilled
+                            |> Maybe.withDefault False
                 in
-                (currentConnectionSize < maxConnectionSize || currentConnectionSize > 0) && isThereClearWay puzzle fromIdx toIdx
+                (currentConnectionSize > 0 || (currentConnectionSize < maxConnectionSize && (not <| isToFilled ())))
+                    && isThereClearWay puzzle fromIdx toIdx
 
             Nothing ->
                 False

@@ -3,6 +3,9 @@ module Puzzle.Model exposing (..)
 import Dict exposing (Dict)
 import List.Extra
 import Maybe exposing (Maybe)
+import Maybe.Extra
+import Utils.Collections exposing (findAndGetRest)
+import Utils.Misc exposing (either)
 
 
 type Orientation
@@ -19,17 +22,17 @@ type Direction
 
 type Island
     = -- position index in array, max connection counts, current connection counts
-      Island Int ConnectionCounts ConnectionCounts
+      Island Int ConnectionSizes ConnectionSizes
 
 
 {-| top, right, bottom left
 -}
-type alias ConnectionCounts =
+type alias ConnectionSizes =
     { top : Int, right : Int, bottom : Int, left : Int }
 
 
-connectionCount : Int -> Int -> Int -> Int -> ConnectionCounts
-connectionCount top right bottom left =
+connectionSize : Int -> Int -> Int -> Int -> ConnectionSizes
+connectionSize top right bottom left =
     { top = top, right = right, bottom = bottom, left = left }
 
 
@@ -38,6 +41,7 @@ type alias Puzzle =
     , connections : Connections
     , width : Int
     , height : Int
+    , maxConnectionCount : Int
     }
 
 
@@ -52,11 +56,15 @@ type alias Islands =
 type alias Connections =
     { list : List Connection
     , -- indices of islands which are connected; redundant, optimization for a quick check on drawn bridges over the x,y positions
-      fields : Dict Int ( Int, Int )
+      fields : ConnectionsFields
     }
 
 
-{-| smallerIslandIdx, biggerIslandIdx, connectionCount
+type alias ConnectionsFields =
+    Dict Int ( Int, Int )
+
+
+{-| smallerIslandIdx, biggerIslandIdx, connectionSize
 -}
 type alias Connection =
     ( Int, Int, Int )
@@ -64,15 +72,168 @@ type alias Connection =
 
 addIsland : Int -> Int -> Int -> Int -> Int -> Islands -> Islands
 addIsland index t r b l islands =
-    { list = Island index (connectionCount t r b l) (connectionCount 0 0 0 0) :: islands.list
+    { list = Island index (connectionSize t r b l) (connectionSize 0 0 0 0) :: islands.list
     , fields = Dict.insert index True islands.fields
     }
 
 
-addIslandsConnection : Int -> Int -> Puzzle -> Puzzle
-addIslandsConnection idx1 idx2 puzzle =
-    -- TODO update puzzle.islands and puzzle.connections
-    puzzle
+changeConnectionSizeForIslandNeighbour : Island -> Direction -> Int -> Island
+changeConnectionSizeForIslandNeighbour island neighbourDirection newConnectionSize =
+    case island of
+        Island idx maxConns { top, right, bottom, left } ->
+            let
+                newTop =
+                    neighbourDirection == Up |> either newConnectionSize top
+
+                newLeft =
+                    neighbourDirection == Left |> either newConnectionSize left
+
+                newRight =
+                    neighbourDirection == Right |> either newConnectionSize right
+
+                newBottom =
+                    neighbourDirection == Down |> either newConnectionSize bottom
+            in
+            Island idx maxConns { top = newTop, right = newRight, bottom = newBottom, left = newLeft }
+
+
+switchValue : Int -> Int -> Int -> Int
+switchValue min max current =
+    let
+        step =
+            current + 1
+    in
+    if step > max then
+        min
+
+    else
+        step
+
+
+{-| Do the most basic mechanic of the game - switch a connection size between two islands.
+
+Does not check for a collision since it is called after the drag is stopped.
+However, it does check the current states of islands.
+
+-}
+switchIslandConnections : Int -> Int -> Puzzle -> Puzzle
+switchIslandConnections idx1 idx2 puzzle =
+    let
+        ( sortedIdx1, sortedIdx2 ) =
+            sortedIndex idx1 idx2
+
+        island1 =
+            getIslandByIndex puzzle.islands sortedIdx1
+
+        island2 =
+            getIslandByIndex puzzle.islands sortedIdx2
+
+        ( maybeConn, restConns ) =
+            findAndGetRest (connectionFilterPredicate sortedIdx1 sortedIdx2) puzzle.connections.list
+
+        -- we need to check up local maximums for both islands
+        commonMaxNewConnectionsCount =
+            min
+                (island1 |> Maybe.map getIslandFreeConnectionSize |> Maybe.withDefault 0)
+                (island2 |> Maybe.map getIslandFreeConnectionSize |> Maybe.withDefault 0)
+
+        ( newConnectionList, newConnectionSize ) =
+            case maybeConn of
+                Nothing ->
+                    -- insert a new connection
+                    ( ( sortedIdx1, sortedIdx2, 1 ) :: puzzle.connections.list, 1 )
+
+                Just ( _, _, currentConnCount ) ->
+                    let
+                        commonMaxConnectionSize =
+                            min puzzle.maxConnectionCount (currentConnCount + commonMaxNewConnectionsCount)
+
+                        newConnectionSize_ =
+                            currentConnCount |> switchValue 0 commonMaxConnectionSize
+                    in
+                    -- replace the found one
+                    ( ( sortedIdx1, sortedIdx2, newConnectionSize_ ) :: restConns, newConnectionSize_ )
+
+        dir1to2 =
+            directionFromIsland puzzle.width sortedIdx1 sortedIdx2
+
+        newConnectionFields : ConnectionsFields
+        newConnectionFields =
+            let
+                ( dx, dy ) =
+                    directionToPosDiff dir1to2
+
+                startX =
+                    idx_x puzzle.width sortedIdx1
+
+                startY =
+                    idx_y puzzle.width sortedIdx1
+
+                stepCount =
+                    distanceBetweenIslands puzzle.width sortedIdx1 sortedIdx2 - 2
+
+                iterate x y fields leftSteps =
+                    let
+                        idx =
+                            xy_idx puzzle.width x y
+                    in
+                    case ( Dict.get idx fields, newConnectionSize ) of
+                        ( Just _, 0 ) ->
+                            Dict.remove idx fields
+
+                        ( Nothing, _ ) ->
+                            Dict.insert idx ( sortedIdx1, sortedIdx2 ) fields
+
+                        _ ->
+                            if leftSteps > 0 then
+                                iterate (x + dx) (y + dy) fields (leftSteps - 1)
+
+                            else
+                                fields
+            in
+            iterate (startX + dx) (startY + dy) puzzle.connections.fields stepCount
+
+        dir2to1 =
+            oppositeDirection dir1to2
+
+        newIsland1 =
+            island1 |> Maybe.map (\i1 -> changeConnectionSizeForIslandNeighbour i1 dir1to2 newConnectionSize)
+
+        newIsland2 =
+            island2 |> Maybe.map (\i2 -> changeConnectionSizeForIslandNeighbour i2 dir2to1 newConnectionSize)
+
+        newConnections : Connections
+        newConnections =
+            { list = newConnectionList, fields = newConnectionFields }
+
+        updateEachIsland : List Island -> List Island -> List Island
+        updateEachIsland currentIslands leftIslands =
+            case leftIslands of
+                [] ->
+                    currentIslands
+
+                island :: rest ->
+                    let
+                        islandIdx =
+                            unwrapIslandIndex island
+                    in
+                    List.Extra.updateIf (\(Island idx _ _) -> idx == islandIdx) (always island) currentIslands
+
+        islandsToUpdate : List Island
+        islandsToUpdate =
+            Maybe.Extra.values [ newIsland1, newIsland2 ]
+
+        newIslandsList =
+            updateEachIsland puzzle.islands.list islandsToUpdate
+
+        newIslands : Islands
+        newIslands =
+            { list = newIslandsList, fields = puzzle.islands.fields }
+
+        newPuzzle =
+            { puzzle | connections = newConnections, islands = newIslands }
+    in
+    newPuzzle
 
 
 xy_idx : Int -> Int -> Int -> Int
@@ -102,16 +263,30 @@ getIslandByIndex islands idx =
         islands.list
 
 
-getIslandFreeConnectionCount : Puzzle -> Island -> Int
-getIslandFreeConnectionCount puzzle island =
-    -- TODO check what an island is connected to
-    0
+getConnection : Connections -> Int -> Int -> Maybe Connection
+getConnection conns idx1 idx2 =
+    conns.list |> List.Extra.find (connectionFilterPredicate idx1 idx2)
 
 
-isIslandFilled : Puzzle -> Island -> Bool
-isIslandFilled puzzle island =
-    -- TODO check bridges
-    False
+connectionFilterPredicate : Int -> Int -> (Connection -> Bool)
+connectionFilterPredicate idx1 idx2 =
+    let
+        ( sortedIdx1, sortedIdx2 ) =
+            sortedIndex idx1 idx2
+    in
+    \( cidx1, cidx2, _ ) -> ( cidx1, cidx2 ) == ( sortedIdx1, sortedIdx2 )
+
+
+getIslandFreeConnectionSize : Island -> Int
+getIslandFreeConnectionSize island =
+    case island of
+        Island _ max cur ->
+            max.top - cur.top + max.right - cur.right + max.bottom - cur.bottom + max.left - cur.left
+
+
+isIslandFilled : Island -> Bool
+isIslandFilled island =
+    getIslandFreeConnectionSize island == 0
 
 
 directionFromIsland : Int -> Int -> Int -> Direction
@@ -136,6 +311,22 @@ directionFromIsland width fromIndex toIndex =
         Up
 
 
+oppositeDirection : Direction -> Direction
+oppositeDirection dir =
+    case dir of
+        Up ->
+            Down
+
+        Right ->
+            Left
+
+        Down ->
+            Up
+
+        Left ->
+            Right
+
+
 distanceBetweenIslands : Int -> Int -> Int -> Int
 distanceBetweenIslands width idx1 idx2 =
     let
@@ -148,8 +339,8 @@ distanceBetweenIslands width idx1 idx2 =
     max dx dy
 
 
-directionToConnectionCount : Direction -> ConnectionCounts -> Int
-directionToConnectionCount dir { top, right, bottom, left } =
+directionToConnectionSize : Direction -> ConnectionSizes -> Int
+directionToConnectionSize dir { top, right, bottom, left } =
     case dir of
         Up ->
             top
@@ -223,6 +414,7 @@ findNeighbourIsland puzzle islandIndex direction =
             )
 
 
+sortedIndex : Int -> Int -> ( Int, Int )
 sortedIndex idx1 idx2 =
     ( min idx1 idx2, max idx1 idx2 )
 

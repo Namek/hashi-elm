@@ -129,12 +129,21 @@ update msg model =
                     pass
 
         GotDragShouldStop ->
-            { model | islandDrag = NoIslandsHovered } |> noCmd
+            case model.islandDrag of
+                SecondIslandPicked percent idx1 idx2 ->
+                    let
+                        newPuzzle =
+                            switchIslandConnections idx1 idx2 puzzle
+                    in
+                    { model | islandDrag = NoIslandsHovered, puzzle = newPuzzle } |> noCmd
+
+                _ ->
+                    { model | islandDrag = NoIslandsHovered } |> noCmd
 
         PinIsland idx1 ->
             case getIsland idx1 of
                 Just island ->
-                    if not (isIslandFilled puzzle island) then
+                    if not (isIslandFilled island) then
                         { model | islandDrag = FirstIslandPinned idx1 } |> noCmd
 
                     else
@@ -411,7 +420,7 @@ renderIslands { puzzle, islandDrag } =
 renderConnection : Puzzle -> Connection -> Html Msg
 renderConnection puzzle conn =
     case conn of
-        ( 0, _, _ ) ->
+        ( _, _, 0 ) ->
             emptySvg
 
         ( from, to, count ) ->

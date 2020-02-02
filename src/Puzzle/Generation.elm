@@ -12,8 +12,8 @@ type Bridge
       Bridge Int Orientation Int Int
 
 
-generatePuzzle_bridges : Int -> Int -> Int -> List Bridge
-generatePuzzle_bridges seed width height =
+generatePuzzle_bridges : Int -> Int -> Int -> Int -> List Bridge
+generatePuzzle_bridges seed width height maxConnectionCount =
     let
         genNums =
             generateNumbers seed
@@ -31,11 +31,11 @@ generatePuzzle_bridges seed width height =
 
         bridgeOrientations : List (Maybe Orientation)
         bridgeOrientations =
-            genNums 0 2 maxBridgesTotal
+            genNums 0 maxConnectionCount maxBridgesTotal
                 |> mapNumbersToValues [ Vertical, Horizontal ] 1
 
         bridgeSizes =
-            genNums 1 2 maxBridgesTotal
+            genNums 1 maxConnectionCount maxBridgesTotal
     in
     -- TODO
     []
@@ -44,8 +44,11 @@ generatePuzzle_bridges seed width height =
 generatePuzzle : Int -> Int -> Int -> Puzzle
 generatePuzzle seed width height =
     let
+        maxConnectionCount =
+            2
+
         bridges =
-            generatePuzzle_bridges seed width height
+            generatePuzzle_bridges seed width height maxConnectionCount
 
         islands =
             bridgesToIslands bridges
@@ -54,6 +57,7 @@ generatePuzzle seed width height =
     , height = height
     , islands = islands
     , connections = { list = [], fields = Dict.empty }
+    , maxConnectionCount = maxConnectionCount
     }
 
 
@@ -127,4 +131,5 @@ puzzle1 =
     , height = height
     , islands = islands
     , connections = { list = [], fields = Dict.empty }
+    , maxConnectionCount = 2
     }

@@ -217,7 +217,9 @@ switchIslandConnections idx1 idx2 puzzle =
                         islandIdx =
                             unwrapIslandIndex island
                     in
-                    List.Extra.updateIf (\(Island idx _ _) -> idx == islandIdx) (always island) currentIslands
+                    updateEachIsland
+                        (List.Extra.updateIf (\(Island idx _ _) -> idx == islandIdx) (always island) currentIslands)
+                        rest
 
         islandsToUpdate : List Island
         islandsToUpdate =
@@ -339,8 +341,8 @@ distanceBetweenIslands width idx1 idx2 =
     max dx dy
 
 
-directionToConnectionSize : Direction -> ConnectionSizes -> Int
-directionToConnectionSize dir { top, right, bottom, left } =
+directionToConnectionSize : ConnectionSizes -> Direction -> Int
+directionToConnectionSize { top, right, bottom, left } dir =
     case dir of
         Up ->
             top
@@ -417,6 +419,49 @@ findNeighbourIsland puzzle islandIndex direction =
 sortedIndex : Int -> Int -> ( Int, Int )
 sortedIndex idx1 idx2 =
     ( min idx1 idx2, max idx1 idx2 )
+
+
+canDraw : Puzzle -> Int -> Int -> Bool
+canDraw puzzle fromIdx toIdx =
+    let
+        fromIsland =
+            getIslandByIndex puzzle.islands fromIdx
+
+        isFilled =
+            fromIsland
+                |> Maybe.map isIslandFilled
+                |> Maybe.withDefault False
+
+        direction =
+            directionFromIsland puzzle.width fromIdx toIdx
+    in
+    if isFilled then
+        -- if the 'from' island is filled then we can allow drawing only for disconnecting existing connections
+        case fromIsland of
+            Just (Island _ maxConns curConns) ->
+                let
+                    currentConnectionSize =
+                        direction |> directionToConnectionSize curConns
+                in
+                currentConnectionSize > 0 && isThereClearWay puzzle fromIdx toIdx
+
+            Nothing ->
+                False
+
+    else
+        case fromIsland of
+            Just (Island _ maxConns curConns) ->
+                let
+                    currentConnectionSize =
+                        direction |> directionToConnectionSize curConns
+
+                    maxConnectionSize =
+                        puzzle.maxConnectionCount
+                in
+                (currentConnectionSize < maxConnectionSize || currentConnectionSize > 0) && isThereClearWay puzzle fromIdx toIdx
+
+            Nothing ->
+                False
 
 
 {-| Check if there is no collision in a way between two puzzles.

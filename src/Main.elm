@@ -141,16 +141,7 @@ update msg model =
                     { model | islandDrag = NoIslandsHovered } |> noCmd
 
         PinIsland idx1 ->
-            case getIsland idx1 of
-                Just island ->
-                    if not (isIslandFilled island) then
-                        { model | islandDrag = FirstIslandPinned idx1 } |> noCmd
-
-                    else
-                        pass
-
-                Nothing ->
-                    pass
+            { model | islandDrag = FirstIslandPinned idx1 } |> noCmd
 
         CheckBridgeDirection ( x, y ) ->
             let
@@ -208,7 +199,7 @@ update msg model =
                     )
                 |> Maybe.andThen
                     (\( i1_idx, i2_idx, distancePercent ) ->
-                        if isThereClearWay puzzle i1_idx i2_idx then
+                        if canDraw puzzle i1_idx i2_idx then
                             Just <| SecondIslandPicked distancePercent i1_idx i2_idx
 
                         else
@@ -327,9 +318,9 @@ renderPuzzle model =
         , Pointer.onMove <| \evt -> CheckBridgeDirection evt.pointer.offsetPos
         ]
         (List.concat
-            [ renderIslands model
-            , alreadyDrawnConnections
+            [ alreadyDrawnConnections
             , temporaryBridge |> maybeToList
+            , renderIslands model
 
             --, [ renderLine px py (px + 1) py "stroke:rgb(0,127,0);stroke-width:1" ]
             ]

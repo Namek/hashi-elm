@@ -396,13 +396,16 @@ renderIslands { puzzle, islandDrag } =
 
                 isHovered =
                     isIslandHovered islandDrag index
+
+                isFilled =
+                    isIslandFilled island
             in
             Svg.g
                 [ Pointer.onOver <| (always <| GotIslandHovered index)
                 , Pointer.onLeave <| always GotIslandUnhovered
                 , Pointer.onDown <| (always <| PinIsland index)
                 ]
-                [ renderCircle number posX posY isHovered
+                [ renderCircle number posX posY isHovered isFilled
                 ]
     in
     puzzle.islands.list |> List.map renderIsland
@@ -455,13 +458,15 @@ renderTemporaryBridge puzzle from to percent =
 -- Non-domain Utils
 
 
-renderCircle number posX posY isHovered =
+renderCircle number posX posY isHovered isFilled =
     Svg.g []
         [ Svg.circle
             [ cx <| strNumf posX
             , cy <| strNumf posY
             , r <| strNum <| circleRadius
-            , fill <| either (color 255 255 255) (color 255 0 0) <| isHovered
+            , fill <|
+                either (color 127 127 127) (either (color 255 255 255) (color 255 0 0) <| isHovered) <|
+                    (not isHovered && isFilled)
             , stroke <| color 0 0 0
             ]
             []

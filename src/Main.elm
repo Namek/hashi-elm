@@ -25,6 +25,7 @@ main =
 
 type alias Model =
     { puzzle : Puzzle
+    , isPuzzleDone : Bool
     , islandDrag : IslandDrag
     }
 
@@ -42,6 +43,7 @@ init flags =
             17
     in
     ( { puzzle = puzzle1 -- generatePuzzle seed width height
+      , isPuzzleDone = False
       , islandDrag = NoIslandsHovered
       }
     , Cmd.none
@@ -134,8 +136,11 @@ update msg model =
                     let
                         newPuzzle =
                             switchIslandConnections idx1 idx2 puzzle
+
+                        isPuzzleDone =
+                            isSuccessfullyFinished newPuzzle
                     in
-                    { model | islandDrag = NoIslandsHovered, puzzle = newPuzzle } |> noCmd
+                    { model | islandDrag = NoIslandsHovered, puzzle = newPuzzle, isPuzzleDone = isPuzzleDone } |> noCmd
 
                 _ ->
                     { model | islandDrag = NoIslandsHovered } |> noCmd
@@ -254,6 +259,11 @@ view model =
             , text <| String.fromFloat <| (unwrapTemporaryBridge model.islandDrag |> Maybe.map (\( percent, idx1, idx2 ) -> percent) |> Maybe.withDefault 0.0)
             ]
         , renderPuzzle model
+        , if model.isPuzzleDone then
+            div [] [ text "Puzzle Done!" ]
+
+          else
+            emptySvg
         ]
 
 

@@ -238,6 +238,12 @@ switchIslandConnections idx1 idx2 puzzle =
     newPuzzle
 
 
+isSuccessfullyFinished : Puzzle -> Bool
+isSuccessfullyFinished puzzle =
+    -- TODO all islands filled is not enough. We need to check if everything is a one connected graph
+    puzzle.islands.list |> List.all isIslandFilled
+
+
 xy_idx : Int -> Int -> Int -> Int
 xy_idx width x y =
     y * width + x

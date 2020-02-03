@@ -4,6 +4,7 @@ import Browser
 import Html exposing (Html, div, text)
 import Html.Attributes
 import Html.Events.Extra.Pointer as Pointer
+import List.Extra
 import Maybe.Extra
 import Puzzle.Generation exposing (puzzle1)
 import Puzzle.Model exposing (..)
@@ -353,6 +354,12 @@ circleRadius =
     fieldSize // 2
 
 
+{-| defines the distance between lines
+-}
+connectionLineMargin =
+    3
+
+
 getIslandRenderPos : Int -> Int -> ( Float, Float )
 getIslandRenderPos width index =
     ( idx_x width index * fieldSize + circleRadius |> toFloat
@@ -423,24 +430,63 @@ renderIslands { puzzle, islandDrag } =
 
 renderConnection : Puzzle -> Connection -> Html Msg
 renderConnection puzzle conn =
-    case conn of
-        ( _, _, 0 ) ->
+    case conn.connectionSize of
+        0 ->
             emptySvg
 
-        ( from, to, count ) ->
+        count ->
             let
                 ( startX, startY ) =
-                    getIslandRenderPos puzzle.width from
+                    getIslandRenderPos puzzle.width conn.idx1
 
                 ( endX, endY ) =
-                    getIslandRenderPos puzzle.width to
+                    getIslandRenderPos puzzle.width conn.idx2
             in
-            renderLines count startX startY endX endY
+            renderLines count startX startY endX endY conn.orientation
 
 
-renderLines count startX startY endX endY =
-    -- TODO count
-    renderLine startX startY endX endY "stroke:rgb(255,0,0);stroke-width:0.5"
+renderLines : Int -> Float -> Float -> Float -> Float -> Orientation -> Html Msg
+renderLines count startX startY endX endY orientation =
+    let
+        m =
+            -connectionLineMargin / 2.0
+
+        distances =
+            case count of
+                1 ->
+                    [ 0.0 ]
+
+                2 ->
+                    [ -m / 2, m / 2 ]
+
+                3 ->
+                    [ -m, 0.0, m ]
+
+                4 ->
+                    [ -(m * 3 / 2), -m / 2, m / 2, m * 1.5 ]
+
+                _ ->
+                    []
+
+        zeros =
+            List.Extra.initialize count (always 0)
+
+        coordDiffs =
+            case orientation of
+                Vertical ->
+                    List.Extra.zip distances zeros
+
+                Horizontal ->
+                    List.Extra.zip zeros distances
+
+        lines =
+            coordDiffs
+                |> List.map
+                    (\( dx, dy ) ->
+                        renderLine (startX + dx) (startY + dy) (endX + dx) (endY + dy) "stroke:rgb(255,0,0);stroke-width:0.5"
+                    )
+    in
+    Svg.g [] lines
 
 
 renderTemporaryBridge : Puzzle -> Int -> Int -> Float -> Html Msg

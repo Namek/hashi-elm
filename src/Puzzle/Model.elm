@@ -67,7 +67,7 @@ type alias ConnectionsFields =
 {-| smallerIslandIdx, biggerIslandIdx, connectionSize
 -}
 type alias Connection =
-    ( Int, Int, Int )
+    { idx1 : Int, idx2 : Int, connectionSize : Int, orientation : Orientation }
 
 
 addIsland : Int -> Int -> Int -> Int -> Int -> Islands -> Islands
@@ -141,18 +141,31 @@ switchIslandConnections idx1 idx2 puzzle =
             case maybeConn of
                 Nothing ->
                     -- insert a new connection
-                    ( ( sortedIdx1, sortedIdx2, 1 ) :: puzzle.connections.list, 1 )
+                    let
+                        connectionOrientation : Orientation
+                        connectionOrientation =
+                            directionFromIsland puzzle.width idx1 idx2
+                                |> directionToOrientation
 
-                Just ( _, _, currentConnCount ) ->
+                        newConnection : Connection
+                        newConnection =
+                            { idx1 = sortedIdx1, idx2 = sortedIdx2, connectionSize = 1, orientation = connectionOrientation }
+                    in
+                    ( newConnection :: puzzle.connections.list, 1 )
+
+                Just conn ->
+                    -- replace the found one
                     let
                         commonMaxConnectionSize =
-                            min puzzle.maxConnectionCount (currentConnCount + commonMaxNewConnectionsCount)
+                            min puzzle.maxConnectionCount (conn.connectionSize + commonMaxNewConnectionsCount)
 
                         newConnectionSize_ =
-                            currentConnCount |> switchValue 0 commonMaxConnectionSize
+                            conn.connectionSize |> switchValue 0 commonMaxConnectionSize
+
+                        newConnection =
+                            { idx1 = sortedIdx1, idx2 = sortedIdx2, connectionSize = newConnectionSize_, orientation = conn.orientation }
                     in
-                    -- replace the found one
-                    ( ( sortedIdx1, sortedIdx2, newConnectionSize_ ) :: restConns, newConnectionSize_ )
+                    ( newConnection :: restConns, newConnectionSize_ )
 
         dir1to2 =
             directionFromIsland puzzle.width sortedIdx1 sortedIdx2
@@ -279,10 +292,10 @@ getConnection conns idx1 idx2 =
 connectionFilterPredicate : Int -> Int -> (Connection -> Bool)
 connectionFilterPredicate idx1 idx2 =
     let
-        ( sortedIdx1, sortedIdx2 ) =
+        sortedIndices =
             sortedIndex idx1 idx2
     in
-    \( cidx1, cidx2, _ ) -> ( cidx1, cidx2 ) == ( sortedIdx1, sortedIdx2 )
+    \conn -> ( conn.idx1, conn.idx2 ) == sortedIndices
 
 
 getIslandFreeConnectionSize : Island -> Int
@@ -377,6 +390,22 @@ directionToPosDiff dir =
 
         Left ->
             ( -1, 0 )
+
+
+directionToOrientation : Direction -> Orientation
+directionToOrientation direction =
+    case direction of
+        Up ->
+            Vertical
+
+        Right ->
+            Horizontal
+
+        Down ->
+            Vertical
+
+        Left ->
+            Horizontal
 
 
 traverseToNextIsland : Puzzle -> Int -> Direction -> Maybe Int

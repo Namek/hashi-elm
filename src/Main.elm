@@ -28,6 +28,9 @@ main =
 type alias Model =
     { puzzle : Puzzle
     , puzzle_start : Puzzle
+
+    -- list of island indices switched - first element is last move
+    , moveHistory : List ( Int, Int )
     , isPuzzleDone : Bool
     , islandDrag : IslandDrag
     }
@@ -52,6 +55,7 @@ init flags =
     in
     ( { puzzle = puzzle
       , puzzle_start = puzzle
+      , moveHistory = []
       , isPuzzleDone = False
       , islandDrag = NoIslandsHovered
       }
@@ -80,6 +84,7 @@ type Msg
     | PinIsland Int
     | CheckBridgeDirection ( Float, Float )
     | Reset
+    | StepBack
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -145,12 +150,21 @@ update msg model =
                 SecondIslandPicked percent idx1 idx2 ->
                     let
                         newPuzzle =
-                            switchIslandConnections idx1 idx2 puzzle
+                            switchIslandConnections Forward idx1 idx2 puzzle
+
+                        moveHistory =
+                            ( idx1, idx2 ) :: model.moveHistory
 
                         isPuzzleDone =
                             isSuccessfullyFinished newPuzzle
                     in
-                    { model | islandDrag = NoIslandsHovered, puzzle = newPuzzle, isPuzzleDone = isPuzzleDone } |> noCmd
+                    { model
+                        | islandDrag = NoIslandsHovered
+                        , puzzle = newPuzzle
+                        , moveHistory = moveHistory
+                        , isPuzzleDone = isPuzzleDone
+                    }
+                        |> noCmd
 
                 _ ->
                     { model | islandDrag = NoIslandsHovered } |> noCmd
@@ -235,7 +249,19 @@ update msg model =
                     pass
 
         Reset ->
-            { model | puzzle = model.puzzle_start } |> noCmd
+            { model | puzzle = model.puzzle_start, moveHistory = [] } |> noCmd
+
+        StepBack ->
+            case model.moveHistory of
+                [] ->
+                    model |> noCmd
+
+                ( idx1, idx2 ) :: restMoves ->
+                    { model
+                        | puzzle = switchIslandConnections Backward idx1 idx2 model.puzzle
+                        , moveHistory = restMoves
+                    }
+                        |> noCmd
 
 
 directionFromPoint ( fromX, fromY ) ( toX, toY ) =
@@ -271,7 +297,10 @@ view model =
             , text <| String.fromInt <| model.puzzle.height
             , text <| String.fromFloat <| (unwrapTemporaryBridge model.islandDrag |> Maybe.map (\( percent, idx1, idx2 ) -> percent) |> Maybe.withDefault 0.0)
             ]
-        , div [] [ Html.button [ Html.Events.onClick Reset ] [ text "Reset" ] ]
+        , div []
+            [ Html.button [ Html.Events.onClick StepBack, Html.Attributes.disabled (model.moveHistory == []) ] [ text "Back" ]
+            , Html.button [ Html.Events.onClick Reset ] [ text "Reset" ]
+            ]
         , renderPuzzle model
         , if model.isPuzzleDone then
             div [] [ text "Puzzle Done!" ]

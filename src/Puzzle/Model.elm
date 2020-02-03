@@ -70,6 +70,11 @@ type alias Connection =
     { idx1 : Int, idx2 : Int, connectionSize : Int, orientation : Orientation }
 
 
+type TimeDirection
+    = Forward
+    | Backward
+
+
 addIsland : Int -> Int -> Int -> Int -> Int -> Islands -> Islands
 addIsland index t r b l islands =
     { list = Island index (connectionSize t r b l) (connectionSize 0 0 0 0) :: islands.list
@@ -97,14 +102,25 @@ changeConnectionSizeForIslandNeighbour island neighbourDirection newConnectionSi
             Island idx maxConns { top = newTop, right = newRight, bottom = newBottom, left = newLeft }
 
 
-switchValue : Int -> Int -> Int -> Int
-switchValue min max current =
+switchValue : Int -> Int -> TimeDirection -> Int -> Int
+switchValue min max timeDirection current =
     let
+        diff =
+            case timeDirection of
+                Forward ->
+                    1
+
+                Backward ->
+                    -1
+
         step =
-            current + 1
+            current + diff
     in
     if step > max then
         min
+
+    else if step < min then
+        max
 
     else
         step
@@ -116,8 +132,8 @@ Does not check for a collision since it is called after the drag is stopped.
 However, it does check the current states of islands.
 
 -}
-switchIslandConnections : Int -> Int -> Puzzle -> Puzzle
-switchIslandConnections idx1 idx2 puzzle =
+switchIslandConnections : TimeDirection -> Int -> Int -> Puzzle -> Puzzle
+switchIslandConnections timeDirection idx1 idx2 puzzle =
     let
         ( sortedIdx1, sortedIdx2 ) =
             sortedIndex idx1 idx2
@@ -160,7 +176,7 @@ switchIslandConnections idx1 idx2 puzzle =
                             min puzzle.maxConnectionCount (conn.connectionSize + commonMaxNewConnectionsCount)
 
                         newConnectionSize_ =
-                            conn.connectionSize |> switchValue 0 commonMaxConnectionSize
+                            conn.connectionSize |> switchValue 0 commonMaxConnectionSize timeDirection
 
                         newConnection =
                             { idx1 = sortedIdx1, idx2 = sortedIdx2, connectionSize = newConnectionSize_, orientation = conn.orientation }

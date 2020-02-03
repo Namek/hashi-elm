@@ -3,6 +3,7 @@ module Main exposing (main)
 import Browser
 import Html exposing (Html, div, text)
 import Html.Attributes
+import Html.Events
 import Html.Events.Extra.Pointer as Pointer
 import List.Extra
 import Maybe.Extra
@@ -26,6 +27,7 @@ main =
 
 type alias Model =
     { puzzle : Puzzle
+    , puzzle_start : Puzzle
     , isPuzzleDone : Bool
     , islandDrag : IslandDrag
     }
@@ -42,8 +44,14 @@ init flags =
 
         seed =
             17
+
+        puzzle =
+            puzzle1
+
+        -- generatePuzzle seed width height
     in
-    ( { puzzle = puzzle1 -- generatePuzzle seed width height
+    ( { puzzle = puzzle
+      , puzzle_start = puzzle
       , isPuzzleDone = False
       , islandDrag = NoIslandsHovered
       }
@@ -71,6 +79,7 @@ type Msg
     | GotDragShouldStop
     | PinIsland Int
     | CheckBridgeDirection ( Float, Float )
+    | Reset
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -225,6 +234,9 @@ update msg model =
                 |> Maybe.withDefault
                     pass
 
+        Reset ->
+            { model | puzzle = model.puzzle_start } |> noCmd
+
 
 directionFromPoint ( fromX, fromY ) ( toX, toY ) =
     let
@@ -259,6 +271,7 @@ view model =
             , text <| String.fromInt <| model.puzzle.height
             , text <| String.fromFloat <| (unwrapTemporaryBridge model.islandDrag |> Maybe.map (\( percent, idx1, idx2 ) -> percent) |> Maybe.withDefault 0.0)
             ]
+        , div [] [ Html.button [ Html.Events.onClick Reset ] [ text "Reset" ] ]
         , renderPuzzle model
         , if model.isPuzzleDone then
             div [] [ text "Puzzle Done!" ]

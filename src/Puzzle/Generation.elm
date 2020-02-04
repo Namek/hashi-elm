@@ -2,13 +2,15 @@ module Puzzle.Generation exposing (..)
 
 import Array exposing (Array)
 import Dict exposing (Dict)
+import List.Extra
 import Puzzle.Model exposing (..)
 import Utils.Collections exposing (mapNumbersToValues)
+import Utils.Misc exposing (either)
 import Utils.Random exposing (generateNumbers)
 
 
 type Bridge
-    = -- current connection count, max connection count, 2 indices (in the array) of the connected islands
+    = -- connection count, orientation, 2 indices (in the array) of the connected islands
       Bridge Int Orientation Int Int
 
 
@@ -51,7 +53,7 @@ generatePuzzle seed width height =
             generatePuzzle_bridges seed width height maxConnectionCount
 
         islands =
-            bridgesToIslands bridges
+            bridgesToIslands width bridges
     in
     { width = width
     , height = height
@@ -59,12 +61,6 @@ generatePuzzle seed width height =
     , connections = { list = [], fields = Dict.empty }
     , maxConnectionCount = maxConnectionCount
     }
-
-
-bridgesToIslands : List Bridge -> Islands
-bridgesToIslands bridges =
-    -- TODO
-    { list = [], fields = Dict.empty }
 
 
 getBridgesOfIsland : List Bridge -> Int -> List ( Bridge, Int )
@@ -90,6 +86,69 @@ getBridgesOfIsland bridges islandIndex =
             )
 
 
+directionToConnectionSizes : Int -> Direction -> ConnectionSizes
+directionToConnectionSizes count dir =
+    { top = either count 0 <| dir == Up
+    , right = either count 0 <| dir == Right
+    , bottom = either count 0 <| dir == Down
+    , left = either count 0 <| dir == Left
+    }
+
+
+sumConnectionSizes conn1 conn2 =
+    { top = conn1.top + conn2.top
+    , right = conn1.right + conn2.right
+    , bottom = conn1.bottom + conn2.bottom
+    , left = conn1.left + conn2.left
+    }
+
+
+bridgesToIslands : Int -> List Bridge -> Islands
+bridgesToIslands mapWidth bridges =
+    let
+        increaseIsland : Int -> ConnectionSizes -> Islands -> Islands
+        increaseIsland index connectionSizesToAdd islands =
+            case Dict.get index islands.fields of
+                Just _ ->
+                    { islands
+                        | list =
+                            islands.list
+                                |> List.Extra.updateIf
+                                    (\(Island idx _ _) -> idx == index)
+                                    (\(Island idx maxConns curConns) ->
+                                        Island idx (sumConnectionSizes maxConns connectionSizesToAdd) curConns
+                                    )
+                    }
+
+                Nothing ->
+                    { list = Island index connectionSizesToAdd (connectionSize 0 0 0 0) :: islands.list
+                    , fields = Dict.insert index True islands.fields
+                    }
+
+        addNextBridge leftBridges state =
+            case leftBridges of
+                [] ->
+                    state
+
+                (Bridge connectionCount orientation idx1 idx2) :: restBridges ->
+                    let
+                        dir1 =
+                            directionFromIsland mapWidth idx1 idx2
+
+                        dir2 =
+                            dir1 |> oppositeDirection
+
+                        sizes1 =
+                            dir1 |> directionToConnectionSizes connectionCount
+
+                        sizes2 =
+                            dir2 |> directionToConnectionSizes connectionCount
+                    in
+                    addNextBridge restBridges (increaseIsland idx1 sizes1 state |> increaseIsland idx2 sizes2)
+    in
+    addNextBridge bridges { list = [], fields = Dict.empty }
+
+
 puzzle1 : Puzzle
 puzzle1 =
     let
@@ -99,10 +158,6 @@ puzzle1 =
         height =
             5
 
-        isl : Int -> Int -> Int -> Int -> Int -> Islands -> Islands
-        isl =
-            addIsland
-
         brg =
             Bridge
 
@@ -111,21 +166,12 @@ puzzle1 =
             , brg 1 Vertical 0 16
             , brg 1 Vertical 3 11
             , brg 1 Horizontal 9 11
+            , brg 1 Horizontal 11 19
             , brg 1 Horizontal 16 19
             ]
 
-        -- TODO this should be the final solution, not manually defining an island list
-        --islands =
-        --    bridgesToIslands bridges
-        islands : Islands
         islands =
-            { list = [], fields = Dict.empty }
-                |> isl 0 0 2 1 0
-                |> isl 3 0 0 1 2
-                |> isl 9 0 1 0 0
-                |> isl 11 0 0 2 1
-                |> isl 16 2 0 0 0
-                |> isl 19 1 0 0 1
+            bridgesToIslands width bridges
     in
     { width = width
     , height = height
